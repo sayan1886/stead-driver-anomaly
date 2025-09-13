@@ -1,0 +1,4 @@
+dataset:
+  type: x3d
+  root_dir: ./X3D_Videos
+  batch_size: 32

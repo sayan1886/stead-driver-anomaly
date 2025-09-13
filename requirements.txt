@@ -1,6 +1,7 @@
 
 torch>=2.0
 torchvision
+pytorchvideo
 numpy
 opencv-python
 scikit-learn

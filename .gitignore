@@ -1,0 +1,5 @@
+.venv/
+__pycache__/
+X3D_Videos/*
+X3D_Raw_Videos/*
+!X3D_Videos_sample/
