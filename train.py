@@ -1,3 +1,4 @@
+# train.py
 import torch
 from torch.utils.data import DataLoader
 from models.stead_model import STEAD
@@ -18,7 +19,7 @@ test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
 
 # Model
 # Make sure feature_dim matches your actual X3D features
-feature_dim = 1024  # Adjust based on your .npy features shape [T, F]
+feature_dim = 2048  # Adjust based on your .npy features shape [T, F]
 seq_len = 16        # Number of frames/time steps per clip
 model = STEAD(feature_dim=feature_dim, seq_len=seq_len).to(device)
 

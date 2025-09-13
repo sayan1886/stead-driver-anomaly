@@ -1,5 +1,7 @@
 .venv/
 __pycache__/
+.mypy_cache/
+checkpoints/
 X3D_Videos/*
 X3D_Videos-Bak/*
 X3D_Raw_Videos/*
