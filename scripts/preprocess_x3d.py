@@ -1,12 +1,11 @@
 # scripts/preprocess_x3d.py
 import os
 import torch
-import torch.nn as nn
 import numpy as np
 import cv2
 from tqdm import tqdm
-from pytorchvideo.models.hub import x3d_s
-from torchvision.transforms import Compose, Normalize, Lambda
+from pytorchvideo.models.hub import x3d_m
+import torch.nn as nn
 
 # ------------------------------
 # Configuration
@@ -14,47 +13,65 @@ from torchvision.transforms import Compose, Normalize, Lambda
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 CLIP_LEN = 16
 CROP_SIZE = 224
-DEBUG = True  # Set False to disable debug prints
-
-# Transformation
-transform = Compose([
-    Lambda(lambda x: x / 255.0),
-    Normalize(mean=[0.45, 0.45, 0.45], std=[0.225, 0.225, 0.225])
-])
+DEBUG = False  # Set False to disable debug prints
 
 # ------------------------------
-# Initialize X3D model (pretrained)
+# Initialize X3D (pretrained)
 # ------------------------------
-model = x3d_s(pretrained=True, progress=True)
+model = x3d_m(pretrained=True)
 model = model.eval().to(DEVICE)
 
+# Remove only the classification projection (keep pooling!)
+if hasattr(model.blocks[-1], "proj"):
+    model.blocks[-1].proj = nn.Identity()
+
+# ------------------------------
+# Feature extraction function
+# ------------------------------
 def extract_features_from_npy(npy_path):
-    data = np.load(npy_path)  # shape: [num_frames, 16, H, W]
-    
-    # Take first CLIP_LEN frames
-    clip = data[:CLIP_LEN]  # [CLIP_LEN, 16, H, W]
+    """
+    Extract X3D features per clip.
+    Returns: [T=CLIP_LEN, F=feature_dim]
+    """
+    data = np.load(npy_path)  # [num_frames, 16, H, W]
+    if DEBUG: print(f"[DEBUG] Loaded {npy_path}: {data.shape}")
 
-    # Reduce 16 channels → 3 channels (take first 3)
-    clip = clip[:, :3, :, :]  # [CLIP_LEN, 3, H, W]
+    if data.shape[0] < CLIP_LEN:
+        if DEBUG: print(f"[DEBUG] Skipping {npy_path}, not enough frames")
+        return None
 
-    # Resize and normalize
+    clip = data[:CLIP_LEN]  # [CLIP_LEN,16,H,W]
+    if DEBUG: print(f"[DEBUG] Clip selected: {clip.shape}")
+
+    # Convert 16-channel → 3-channel
+    clip_rgb = np.mean(clip, axis=1, keepdims=True)  # [CLIP_LEN,1,H,W]
+    clip_rgb = np.repeat(clip_rgb, 3, axis=1)        # [CLIP_LEN,3,H,W]
+    if DEBUG: print(f"[DEBUG] Clip after channel conversion: {clip_rgb.shape}")
+
+    # Resize & normalize
     frames = []
-    for f in clip:  # f: [3, H, W]
+    mean = torch.tensor([0.45, 0.45, 0.45])[:, None, None]
+    std = torch.tensor([0.225, 0.225, 0.225])[:, None, None]
+
+    for f in clip_rgb:
         resized = np.stack([cv2.resize(f[c], (CROP_SIZE, CROP_SIZE)) for c in range(3)], axis=0)
-        # Normalize
         f_tensor = torch.tensor(resized, dtype=torch.float32) / 255.0
-        mean = torch.tensor([0.45, 0.45, 0.45])[:, None, None]
-        std = torch.tensor([0.225, 0.225, 0.225])[:, None, None]
         f_tensor = (f_tensor - mean) / std
         frames.append(f_tensor)
 
-    clip_tensor = torch.stack(frames).unsqueeze(0).to(DEVICE)  # [1, T, C, H, W]
-    clip_tensor = clip_tensor.permute(0,2,1,3,4)  # -> [B, C, T, H, W]
+    clip_tensor = torch.stack(frames).unsqueeze(0).to(DEVICE)  # [1,T,C,H,W]
+    if DEBUG: print(f"[DEBUG] Clip tensor after stacking: {clip_tensor.shape}")
+    clip_tensor = clip_tensor.permute(0, 2, 1, 3, 4)           # [B,C,T,H,W]
+    if DEBUG: print(f"[DEBUG] Clip tensor after permute: {clip_tensor.shape}")
 
+    # Forward through model
     with torch.no_grad():
-        features = model(clip_tensor)
+        feats = model(clip_tensor)           # [1, 2048] for x3d_m
+        if DEBUG: print(f"[DEBUG] Features raw: {feats.shape}")
+        features = feats.repeat(CLIP_LEN, 1) # [T, F]
+        if DEBUG: print(f"[DEBUG] Features repeated: {features.shape}")
 
-    return features.squeeze(0).cpu().numpy()
+    return features.cpu().numpy()
 
 # ------------------------------
 # Process all .npy files recursively
@@ -82,12 +99,11 @@ def process_npy_files(input_dir, output_dir):
 
 # ------------------------------
 # Main
-# Usage: python scripts/preprocess_x3d.py --input_dir X3D_Raw_Videos --output_dir X3D_Videos
 # ------------------------------
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(
-        description="Preprocess .npy videos through X3D to extract features.\n"
+        description="Preprocess .npy videos through X3D backbone to extract features per frame.\n"
                     "Example:\n"
                     "python scripts/preprocess_x3d.py "
                     "--input_dir X3D_Raw_Videos "
