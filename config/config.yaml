@@ -36,7 +36,13 @@ optimizer:
 
 # Evaluation configuration
 evaluation:
+  mse_threshold: 0.001             # Threshold for anomaly detection
+  validation_split: 0.2            # Fraction of dataset for validation
   metrics:
+    - name: mse
+      type: mean_squared_error
+    - name: auc
+      type: area_under_curve
     - name: psnr
       type: peak_signal_to_noise_ratio
     - name: ssim
