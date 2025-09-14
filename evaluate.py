@@ -18,7 +18,9 @@ def evaluate_stead(cfg, data_dir, checkpoint):
     if DEBUG:
         print(f"[DEBUG] Using device: {device}")
 
+    # ------------------------------
     # Model setup
+    # ------------------------------
     feature_dim = int(cfg["model"]["feature_dim"])
     hidden_dim = int(cfg["model"]["hidden_dim"])
     seq_len = int(cfg["model"]["seq_len"])
@@ -36,7 +38,9 @@ def evaluate_stead(cfg, data_dir, checkpoint):
     model.load_state_dict(state_dict)
     model.eval()
 
+    # ------------------------------
     # Dataset setup
+    # ------------------------------
     anomaly_classes = cfg["training"].get("anomaly_class", ["normal"])
     test_dataset = X3DFeatureDataset(root_dir=data_dir, split="test",
                                      anomaly_classes=anomaly_classes, DEBUG=DEBUG)
@@ -46,10 +50,11 @@ def evaluate_stead(cfg, data_dir, checkpoint):
         print(f"[DEBUG] Test dataset size: {len(test_dataset)}")
 
     threshold = float(cfg.get("evaluation", {}).get("mse_threshold", 0.001))
-
     results = []
 
+    # ------------------------------
     # Evaluation loop
+    # ------------------------------
     with torch.no_grad():
         for idx, (xb, labels_idx, labels_class) in enumerate(test_loader):
             xb = xb.to(device)  # [B, T, F]
@@ -58,29 +63,49 @@ def evaluate_stead(cfg, data_dir, checkpoint):
             target = xb.mean(dim=1)  # [B, F]
             mse = ((recon - target) ** 2).mean(dim=1).item()
 
-            # Predict class based on threshold
+            # True class fallback
+            if labels_class is None or len(labels_class) == 0:
+                true_class = "unknown"
+            else:
+                true_class = str(labels_class[0])
+
+            # Predict class
             if mse <= threshold:
                 pred_class = anomaly_classes[0]  # normal
             else:
-                # If anomaly, pick the true class if available, else fallback
-                true_class = labels_class[0] if labels_class else "anomaly"
-                pred_class = true_class
+                pred_class = f"anomaly-{true_class}" if true_class != "normal" else "anomaly-unknown"
 
             results.append({
                 "clip_idx": idx,
                 "mse": mse,
                 "pred_class": pred_class,
-                "true_class": labels_class[0] if labels_class else "unknown"
+                "true_class": true_class
             })
 
             if DEBUG:
-                print(f"[DEBUG] Clip {idx}: MSE={mse:.6f}, Pred={pred_class}, True={labels_class[0] if labels_class else 'unknown'}")
+                print(f"[DEBUG] Clip {idx}: MSE={mse:.6f}, Pred={pred_class}, True={true_class}")
 
+
+    # ------------------------------
     # Summary
+    # ------------------------------
     print("=== Evaluation Summary ===")
     for r in results[:10]:
-        print(f"Clip {r['clip_idx']}: Score={r['mse']:.6f}, Predicted={r['pred_class']}, True={r['true_class']}")
-    print(f"Average anomaly score: {np.mean([r['mse'] for r in results]):.6f}")
+        clip_idx = r['clip_idx']
+        mse = r['mse']
+        pred = r['pred_class']
+        true = r['true_class'] if r['true_class'] != "" else "unknown"
+        print(f"Clip {clip_idx}: Score={mse:.6f}, Predicted={pred}, True={true}")
+
+    avg_mse = np.mean([r['mse'] for r in results])
+    print(f"Average anomaly score: {avg_mse:.6f}")
+
+    # Optional: show a breakdown by predicted subcategory
+    from collections import Counter
+    pred_counter = Counter(r['pred_class'] for r in results)
+    print("\nPredicted class distribution:")
+    for cls, cnt in pred_counter.items():
+        print(f"  {cls}: {cnt}")
 
     return results
 

@@ -67,10 +67,11 @@ class X3DFeatureDataset(Dataset):
         label_class = self.class_labels[idx]
         try:
             feat = np.load(path)  # [T, F]
-            feat = torch.from_numpy(feat).float()
+            feat = torch.from_numpy(feat).float() # convert to torch tensor
         except Exception as e:
             if self.DEBUG:
                 print(f"[DEBUG] Failed to load {path}: {e}")
-            feat = torch.zeros(self.default_shape, dtype=torch.float32)
+            # Return a zero tensor if loading fails
+            feat = torch.zeros(self.default_shape, dtype=torch.float32) # default shape [T, F]
 
         return feat, label_idx, label_class
