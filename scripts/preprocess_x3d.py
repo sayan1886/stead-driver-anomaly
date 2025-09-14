@@ -1,15 +1,15 @@
 # scripts/preprocess_x3d.py
 import os
-import torch
-import numpy as np
-import cv2
-from tqdm import tqdm
-from pytorchvideo.models.hub import x3d_m
-import torch.nn as nn
-
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from tqdm import tqdm
+import numpy as np
+import cv2
+import torch
+import torch.nn as nn
+from pytorchvideo.models.hub import x3d_m
 
 import config.config as cfg_loader
 

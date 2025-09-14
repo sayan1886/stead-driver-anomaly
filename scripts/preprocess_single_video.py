@@ -1,13 +1,14 @@
 # scripts/preprocess_single_video.py
 import os
 import sys
-import torch
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import numpy as np
 import cv2
-from pytorchvideo.models.hub import x3d_m
+import torch
 import torch.nn as nn
+from pytorchvideo.models.hub import x3d_m
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config.config as cfg_loader
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"

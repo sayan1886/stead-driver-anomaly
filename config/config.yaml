@@ -23,6 +23,11 @@ model:
 training:
   epochs: 10
   learning_rate: 1e-3
+  anomaly_class: [
+    "normal", "RoadAccidents", "Arson", "Shoplifting", "Stealing", "Burglary",
+    "Fighting", "Vandalism", "Explosion", "Arrest", "Abuse",
+    "Robbery", "Assault", "Shooting"
+  ]
 
 # Optimization configuration
 optimizer:

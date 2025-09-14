@@ -1,9 +1,10 @@
 # dashcam_dataset.py
+import os
+
+import numpy as np
+import cv2
 import torch
 from torch.utils.data import Dataset
-import cv2
-import os
-import numpy as np
 
 class DashcamDataset(Dataset):
     def __init__(self, folder, seq_len=16, stride=8, resize=(128,128), labels_dict=None):

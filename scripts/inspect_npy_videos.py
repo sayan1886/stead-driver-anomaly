@@ -1,9 +1,10 @@
 # scripts/inspect_npy_videos.py
 import os
-import numpy as np
 import random
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import numpy as np
 
 import config.config as cfg_loader
 

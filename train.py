@@ -1,12 +1,13 @@
 # train.py
 import os
-import torch
-from torch.utils.data import DataLoader
-from models.stead_model import STEAD
-from dataset_x3d import X3DFeatureDataset
-from tqdm import tqdm
 import argparse
 
+from tqdm import tqdm
+import torch
+from torch.utils.data import DataLoader
+from dataset_x3d import X3DFeatureDataset
+
+from models.stead_model import STEAD
 import config.config as cfg_loader
 
 # ------------------------------
@@ -26,9 +27,12 @@ def train_stead(cfg):
     # ------------------------------
     data_root = cfg["dataset"]["root_dir"]
     batch_size = int(cfg["dataset"].get("batch_size", 16))
+    anomaly_classes = cfg["training"].get("anomaly_class", ["normal", "anomaly"])
 
-    train_dataset = X3DFeatureDataset(root_dir=data_root, split="train")
-    test_dataset = X3DFeatureDataset(root_dir=data_root, split="test")
+    train_dataset = X3DFeatureDataset(root_dir=data_root, split="train",
+                                      anomaly_classes=anomaly_classes, DEBUG=DEBUG)
+    test_dataset = X3DFeatureDataset(root_dir=data_root, split="test",
+                                     anomaly_classes=anomaly_classes, DEBUG=DEBUG)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
@@ -73,7 +77,7 @@ def train_stead(cfg):
     for epoch in range(epochs):
         model.train()
         running_loss = 0.0
-        for xb, _ in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
+        for xb, labels_idx, labels_class in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
             xb = xb.to(device)  # [B, T, F]
 
             # Forward
@@ -89,6 +93,10 @@ def train_stead(cfg):
             optimizer.step()
 
             running_loss += loss.item()
+
+            if DEBUG:
+                print(f"[DEBUG] Batch labels (numeric): {labels_idx}")
+                print(f"[DEBUG] Batch labels (class): {labels_class}")
 
         avg_loss = running_loss / len(train_loader)
         print(f"Epoch {epoch+1}/{epochs} loss: {avg_loss:.6f}")
