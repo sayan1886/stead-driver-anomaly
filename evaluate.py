@@ -127,5 +127,6 @@ def main():
     cfg = cfg_loader.load_config(args.config)
     evaluate_stead(cfg, args.data_dir, args.checkpoint)
 
+
 if __name__ == "__main__":
     main()
