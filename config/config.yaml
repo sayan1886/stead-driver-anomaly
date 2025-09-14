@@ -1,0 +1,38 @@
+# config.yaml
+
+checkpoint: "checkpoints/stead_driver.pt"
+debug: true
+
+# Dataset configuration
+dataset:
+  type: x3d
+  input_dir: ./X3D_Raw_Videos
+  root_dir: ./X3D_Videos
+  batch_size: 32
+
+# Model configuration
+model:
+  type: stead
+  feature_dim: 2048
+  hidden_dim: 64
+  seq_len: 16
+  num_heads: 4
+  crop_size: 224
+
+# Training configuration
+training:
+  epochs: 10
+  learning_rate: 1e-3
+
+# Optimization configuration
+optimizer:
+  type: adam
+  weight_decay: 1e-4
+
+# Evaluation configuration
+evaluation:
+  metrics:
+    - name: psnr
+      type: peak_signal_to_noise_ratio
+    - name: ssim
+      type: structural_similarity_index

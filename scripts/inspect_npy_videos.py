@@ -2,6 +2,10 @@
 import os
 import numpy as np
 import random
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import config.config as cfg_loader
 
 def inspect_npy_file(npy_path, max_frames=3):
     data = np.load(npy_path)
@@ -34,22 +38,46 @@ def inspect_random_npy(input_dir, sample_size=10):
 
     sampled_files = random.sample(all_files, min(sample_size, len(all_files)))
     for npy_path in sampled_files:
-        inspect_npy_file(npy_path)
+        inspect_npy_file(npy_path, max_frames=3)
+
 
 # ------------------------------
 # Main
-# Usage: python scripts/inspect_npy_videos.py --input_dir X3D_Raw_Videos --sample_size 10
+# Usage: python scripts/inspect_npy_videos.py --config config/config.yaml --sample_size 10
 # ------------------------------
-if __name__ == "__main__":
+def main():
     import argparse
+
     parser = argparse.ArgumentParser(
-        description="Inspect random .npy video files to understand shape, dtype, and content"
+        description="Inspect random .npy video files to understand shape, dtype, and content\n"
+                    "Usage:\n"
+                    "  python scripts/inspect_npy_videos.py --config config/config.yaml --sample_size 10\n"
     )
-    parser.add_argument("--input_dir", type=str, required=True, help="Directory containing .npy video files")
-    parser.add_argument("--sample_size", type=int, default=10, help="Number of random files to inspect")
+    parser.add_argument(
+        "--config",
+        type=str,
+        required=True,
+        help="Path to YAML config file (e.g., config/config.yaml)"
+    )
+    parser.add_argument(
+        "--sample_size",
+        type=int,
+        default=None,
+        help="Number of random files to inspect (overrides config if provided)"
+    )
     args = parser.parse_args()
 
-    print("Inspecting random .npy files from:", args.input_dir)
-    inspect_random_npy(args.input_dir, sample_size=args.sample_size)
-    print("\nUsage example:")
-    print("python scripts/inspect_npy_videos.py --input_dir X3D_Raw_Videos --sample_size 10")
+    # Load YAML config
+    cfg = cfg_loader.load_config(args.config)
+    input_dir = cfg["dataset"].get("raw_dir", "./X3D_Raw_Videos")
+    sample_size = args.sample_size if args.sample_size is not None else 10
+
+    print("=== Inspecting random .npy video files ===")
+    print(f"Input directory : {input_dir}")
+    print(f"Sample size     : {sample_size}")
+    print("-----------------------------------------\n")
+
+    inspect_random_npy(input_dir, sample_size=sample_size)
+    
+if __name__ == "__main__":
+    main()

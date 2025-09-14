@@ -7,28 +7,21 @@ from tqdm import tqdm
 from pytorchvideo.models.hub import x3d_m
 import torch.nn as nn
 
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import config.config as cfg_loader
+
 # ------------------------------
 # Configuration
 # ------------------------------
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-CLIP_LEN = 16
-CROP_SIZE = 224
-DEBUG = False  # Set False to disable debug prints
-
-# ------------------------------
-# Initialize X3D (pretrained)
-# ------------------------------
-model = x3d_m(pretrained=True)
-model = model.eval().to(DEVICE)
-
-# Remove only the classification projection (keep pooling!)
-if hasattr(model.blocks[-1], "proj"):
-    model.blocks[-1].proj = nn.Identity()
 
 # ------------------------------
 # Feature extraction function
 # ------------------------------
-def extract_features_from_npy(npy_path):
+def extract_features_from_npy(npy_path, model, CLIP_LEN, CROP_SIZE, DEBUG=False):
     """
     Extract X3D features per clip.
     Returns: [T=CLIP_LEN, F=feature_dim]
@@ -76,7 +69,7 @@ def extract_features_from_npy(npy_path):
 # ------------------------------
 # Process all .npy files recursively
 # ------------------------------
-def process_npy_files(input_dir, output_dir):
+def process_npy_files(input_dir, output_dir, model, CLIP_LEN, CROP_SIZE, DEBUG=False):
     all_files = []
     for root, dirs, files in os.walk(input_dir):
         for f in files:
@@ -88,7 +81,7 @@ def process_npy_files(input_dir, output_dir):
         out_dir = os.path.join(output_dir, rel_path)
         os.makedirs(out_dir, exist_ok=True)
 
-        features = extract_features_from_npy(npy_path)
+        features = extract_features_from_npy(npy_path, model, CLIP_LEN, CROP_SIZE, DEBUG=DEBUG)
         if features is None:
             continue
 
@@ -100,22 +93,49 @@ def process_npy_files(input_dir, output_dir):
 # ------------------------------
 # Main
 # ------------------------------
-if __name__ == "__main__":
+def main():
     import argparse
+
     parser = argparse.ArgumentParser(
-        description="Preprocess .npy videos through X3D backbone to extract features per frame.\n"
-                    "Example:\n"
-                    "python scripts/preprocess_x3d.py "
-                    "--input_dir X3D_Raw_Videos "
-                    "--output_dir X3D_Videos",
+        description="Preprocess .npy dashcam videos through X3D backbone to extract features per frame.\n"
+                    "Usage:\n"
+                    "  python scripts/preprocess_x3d.py --config config/config.yaml\n",
         formatter_class=argparse.RawTextHelpFormatter
     )
-    parser.add_argument("--input_dir", type=str, required=True, help="Path to raw .npy videos")
-    parser.add_argument("--output_dir", type=str, required=True, help="Path to save features .npy")
+    parser.add_argument(
+        "--config",
+        type=str,
+        required=True,
+        help="Path to YAML config file (e.g., config/config.yaml)"
+    )
     args = parser.parse_args()
 
-    print(f"Starting preprocessing...")
-    print(f"Input directory: {args.input_dir}")
-    print(f"Output directory: {args.output_dir}")
-    process_npy_files(args.input_dir, args.output_dir)
+    # Now parse YAML config
+    cfg = cfg_loader.load_config(args.config)
+
+    CLIP_LEN = cfg["model"]["seq_len"]
+    CROP_SIZE = cfg["model"]["crop_size"]
+    DEBUG = cfg["debug"]
+
+    # Initialize X3D model
+    model = x3d_m(pretrained=True)
+    model = model.eval().to(DEVICE)
+    if hasattr(model.blocks[-1], "proj"):
+        model.blocks[-1].proj = nn.Identity()
+
+    # Directories
+    input_dir = cfg["dataset"].get("raw_dir", "./X3D_Raw_Videos")
+    output_dir = cfg["dataset"].get("root_dir", "./X3D_Videos")
+
+    print("=== STEAD Preprocessing Script ===")
+    print(f"Using config      : {args.config}")
+    print(f"Input directory   : {input_dir}")
+    print(f"Output directory  : {output_dir}")
+    print("------------------------------------")
+
+    process_npy_files(input_dir, output_dir, model, CLIP_LEN, CROP_SIZE, DEBUG=DEBUG)
+
     print("Feature extraction completed!")
+    
+if __name__ == "__main__":
+    main()

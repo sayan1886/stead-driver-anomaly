@@ -1,4 +1,5 @@
 
+pyyaml
 torch>=2.0
 torchvision
 pytorchvideo
