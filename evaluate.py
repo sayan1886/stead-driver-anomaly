@@ -88,31 +88,43 @@ def prepare_datasets(cfg, data_dir, DEBUG=False):
 # ------------------------------
 # Evaluate a single clip
 # ------------------------------
-def evaluate_clip(model, xb, labels_class, anomaly_classes, threshold, metrics_cfg, device, model_type="stead"):
-    xb = xb.to(device)
+# MSE(predicted future feature,actual next feature)
 
-    # Forward & MSE
+def evaluate_clip(model, xb, labels_class, anomaly_classes, threshold, metrics_cfg, device, model_type="stead"):
+    xb = xb.to(device)  # xb shape: [B, seq_len, feature_dim]
+
+    # ------------------------------
+    # Model forward & MSE computation
+    # ------------------------------
     if model_type == "stead":
-        recon, _ = model(xb)
-        target = xb.mean(dim=1)
+        # STEAD predicts next-step features
+        # Input: xb[:, :-1, :] -> all but last step
+        # Target: xb[:, 1:, :] -> all but first step (next-step)
+        input_seq = xb[:, :-1, :]
+        target_seq = xb[:, 1:, :]
+        pred_seq, _ = model(input_seq)
+        mse = ((pred_seq - target_seq) ** 2).mean().item()
+        recon = pred_seq
+        target = target_seq
     elif model_type == "autoencoder":
         recon = model(xb)
         target = xb
+        mse = ((recon - target) ** 2).mean().item()
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
 
-    mse = ((recon - target) ** 2).mean().item()
-
+    # ------------------------------
+    # Determine prediction & true class
+    # ------------------------------
     true_class = labels_class[0] if labels_class else "unknown"
-
     if mse <= threshold:
         pred_class = anomaly_classes[0]  # normal
-        y_true = 0
     else:
         pred_class = true_class if true_class in anomaly_classes else "unknown"
-        y_true = anomaly_classes.index(pred_class) if pred_class in anomaly_classes else len(anomaly_classes)
 
-    # Metrics
+    # ------------------------------
+    # Compute metrics
+    # ------------------------------
     metric_values = {}
     for m in metrics_cfg:
         metric_type = str(m.get("type", "")).lower()
@@ -123,7 +135,7 @@ def evaluate_clip(model, xb, labels_class, anomaly_classes, threshold, metrics_c
         elif "ssim" in metric_type:
             metric_values["ssim"] = compute_ssim(target, recon)
 
-    return mse, pred_class, true_class, y_true, metric_values
+    return mse, pred_class, true_class, metric_values
 
 
 # ------------------------------
@@ -137,55 +149,23 @@ def evaluate(cfg, data_dir):
     if DEBUG:
         print(f"[DEBUG] Using device: {device}, Model type: {model_type}")
 
-    # Load model
     model = load_model(cfg, device, DEBUG)
-
-    # Prepare dataset
     test_dataset, val_dataset, anomaly_classes = prepare_datasets(cfg, data_dir, DEBUG)
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
-    # Metrics config & initial threshold
-    metrics_cfg = cfg.get("evaluation", {}).get("metrics", [])
     initial_threshold = float(cfg.get("evaluation", {}).get("mse_threshold", 0.001))
+    metrics_cfg = cfg.get("evaluation", {}).get("metrics", [])
 
     # ------------------------------
-    # Compute per-class MSE
+    # Collect per-class MSE
     # ------------------------------
-    per_class_scores = defaultdict(list)
-    all_mse_scores = []
+    per_class_scores = {cls: [] for cls in anomaly_classes}
+    results = []
 
-    with torch.no_grad():
-        for xb, _, labels_class in test_loader:
-            true_cls = labels_class[0] if labels_class else "unknown"
-            mse, *_ = evaluate_clip(model, xb, labels_class, anomaly_classes, 0, metrics_cfg, device, model_type)
-            per_class_scores[true_cls].append(mse)
-            all_mse_scores.append(mse)
-
-    # Compute per-class mean/std & suggested threshold
-    per_class_thresholds = {}
-    print("\n=== Per-class MSE & suggested thresholds ===")
-    for cls, scores in per_class_scores.items():
-        mean_mse = np.mean(scores)
-        std_mse = np.std(scores)
-        threshold_cls = mean_mse + 3 * std_mse
-        per_class_thresholds[cls] = threshold_cls
-        print(f"{cls:15s}: mean={mean_mse:.6f}, std={std_mse:.6f}, threshold={threshold_cls:.6f}")
-
-    # Global threshold
-    dynamic_threshold = compute_dynamic_threshold(all_mse_scores, factor=3.0)
-    threshold = max(initial_threshold, dynamic_threshold)
-
-    if DEBUG:
-        print(f"\n[INFO] Initial threshold={initial_threshold:.6f}, Dynamic threshold={dynamic_threshold:.6f}, Using={threshold:.6f}")
-
-    # ------------------------------
-    # Final evaluation
-    # ------------------------------
-    results, y_true_multi, y_score = [], [], []
     with torch.no_grad():
         for idx, (xb, labels_idx, labels_class) in enumerate(test_loader):
-            mse, pred_class, true_class, y_true, metric_values = evaluate_clip(
-                model, xb, labels_class, anomaly_classes, threshold, metrics_cfg, device, model_type
+            mse, pred_class, true_class, metric_values = evaluate_clip(
+                model, xb, labels_class, anomaly_classes, 0, metrics_cfg, device, model_type
             )
             results.append({
                 "clip_idx": idx,
@@ -194,38 +174,39 @@ def evaluate(cfg, data_dir):
                 "true_class": true_class,
                 "metrics": metric_values
             })
-            y_true_multi.append(y_true)
-            y_score.append(mse)
+            if true_class in per_class_scores:
+                per_class_scores[true_class].append(mse)
 
             if DEBUG:
-                print(f"[DEBUG] Clip {idx}: MSE={mse:.6f}, Pred={pred_class}, True={true_class}, Metrics={metric_values}")
-
-    # Compute AUC if multi-class
-    auc_score = None
-    y_true_unique = np.unique(y_true_multi)
-    if len(y_true_unique) > 1:
-        try:
-            if len(y_true_unique) == 2:
-                auc_score = roc_auc_score(y_true_multi, y_score)
-            else:
-                auc_score = roc_auc_score(y_true_multi, y_score, multi_class="ovr")
-        except Exception as e:
-            if DEBUG:
-                print(f"[WARNING] AUC computation failed: {e}")
+                print(f"[DEBUG] Clip {idx}: MSE={mse:.8f}, Pred={pred_class}, True={true_class}, Metrics={metric_values}")
 
     # ------------------------------
-    # Summary
+    # Compute per-class dynamic thresholds
     # ------------------------------
-    print("\n=== Evaluation Summary ===")
-    for r in results[:10]:
-        metrics_str = ", ".join([f"{k}={v:.6f}" for k, v in r["metrics"].items()])
-        print(f"Clip {r['clip_idx']}: Score={r['mse']:.6f}, Pred={r['pred_class']}, True={r['true_class']}, {metrics_str}")
+    per_class_thresholds = {}
+    print("\n=== Per-class MSE & suggested thresholds ===")
+    for cls, scores in per_class_scores.items():
+        mean_mse = np.mean(scores) if scores else 0.0
+        std_mse = np.std(scores) if scores else 0.0
+        threshold_cls = mean_mse + 3 * std_mse
+        per_class_thresholds[cls] = threshold_cls
+        print(f"{cls:15s}: mean={mean_mse:.8f}, std={std_mse:.8f}, threshold={threshold_cls:.8f}")
+
+    # ------------------------------
+    # Flag anomalies using per-class thresholds
+    # ------------------------------
+    print("\n=== Clip anomaly detection using per-class thresholds ===")
+    for r in results[:10]:  # top 10 clips
+        true_cls = r['true_class']
+        cls_thresh = per_class_thresholds.get(true_cls, initial_threshold)
+        is_anomaly = r['mse'] > cls_thresh
+        metrics_str = ", ".join([f"{k}={v:.8f}" for k, v in r["metrics"].items()])
+        print(f"Clip {r['clip_idx']}: True={true_cls}, MSE={r['mse']:.8f}, Threshold={cls_thresh:.8f}, Anomaly={is_anomaly}, {metrics_str}")
 
     avg_mse = np.mean([r['mse'] for r in results])
-    print(f"Average anomaly score (MSE): {avg_mse:.6f}")
-    print(f"AUC: {auc_score:.6f}" if auc_score is not None else "AUC: undefined (single class)")
+    print(f"\nAverage anomaly score (MSE): {avg_mse:.8f}")
 
-    return results, auc_score, val_dataset
+    return results, per_class_thresholds, val_dataset
 
 
 # ------------------------------
