@@ -1,8 +1,8 @@
-# evaluate.py
+# evaluate.py (patched full)
 import os
 import argparse
 import numpy as np
-from collections import defaultdict
+import pandas as pd
 from sklearn.metrics import roc_auc_score
 import matplotlib.pyplot as plt
 
@@ -26,8 +26,7 @@ def compute_psnr(target, recon):
 
 
 def compute_ssim(target, recon):
-    # Placeholder: implement proper SSIM for features if needed
-    return 1.0
+    return 1.0  # Placeholder
 
 
 # ------------------------------
@@ -43,6 +42,7 @@ def compute_dynamic_threshold(scores, factor=3.0):
 def load_model(cfg, device, DEBUG=False):
     model_type = cfg["model"]["type"].lower()
 
+    checkpoint = None
     if model_type == "stead":
         checkpoint = cfg["model"]["stead"].get("checkpoint", None)
     elif model_type == "autoencoder":
@@ -66,10 +66,8 @@ def load_model(cfg, device, DEBUG=False):
 
 def prepare_datasets(cfg, data_dir, DEBUG=False):
     anomaly_classes = cfg["training"].get("anomaly_class", ["normal"])
-    full_dataset = X3DFeatureDataset(
-        root_dir=data_dir, split="test",
-        anomaly_classes=anomaly_classes, DEBUG=DEBUG
-    )
+    full_dataset = X3DFeatureDataset(root_dir=data_dir, split="test",
+                                     anomaly_classes=anomaly_classes, DEBUG=DEBUG)
 
     if DEBUG:
         print(f"[DEBUG] Test dataset size: {len(full_dataset)} samples")
@@ -91,20 +89,14 @@ def prepare_datasets(cfg, data_dir, DEBUG=False):
 # Evaluate a single clip (Autoencoder)
 # ------------------------------
 def evaluate_clip(model, xb, labels_class, anomaly_classes, threshold, metrics_cfg, device, model_type="autoencoder"):
-    xb = xb.to(device)  # xb shape: [B, seq_len, feature_dim]
+    xb = xb.to(device)
+    recon = model(xb)
+    mse = ((recon - xb) ** 2).mean().item()
+    target = xb
 
-    if model_type == "autoencoder":
-        recon = model(xb)
-        mse = ((recon - xb) ** 2).mean().item()
-        target = xb
-    else:
-        raise ValueError(f"Unsupported model type for evaluate_clip: {model_type}")
-
-    # Determine predicted class
     true_class = labels_class[0] if labels_class else "unknown"
     pred_class = anomaly_classes[0] if mse <= threshold else true_class
 
-    # Compute metrics
     metric_values = {}
     for m in metrics_cfg:
         metric_type = str(m.get("type", "")).lower()
@@ -119,37 +111,26 @@ def evaluate_clip(model, xb, labels_class, anomaly_classes, threshold, metrics_c
 
 
 # ------------------------------
-# Evaluate a single clip (STEAD temporal)
+# Evaluate a single clip (STEAD)
 # ------------------------------
 def evaluate_clip_temporal(model, xb, labels_class, anomaly_classes, threshold, metrics_cfg, device):
-    xb = xb.to(device)  # [B, seq_len, feature_dim]
-
-    # STEAD: predict next-step features
+    xb = xb.to(device)
     input_seq = xb[:, :-1, :]
     target_seq = xb[:, 1:, :]
     pred_seq, _ = model(input_seq)
 
-    # Add batch dimension if missing
     if pred_seq.dim() == 2:
-        pred_seq = pred_seq.unsqueeze(0)   # [1, seq_len, feature_dim]
+        pred_seq = pred_seq.unsqueeze(0)
     if target_seq.dim() == 2:
         target_seq = target_seq.unsqueeze(0)
 
-    # Temporal MSE per timestep
-    timestep_errors = []
-    seq_len = pred_seq.shape[1]
-    for t in range(seq_len):
-        t_mse = ((pred_seq[:, t, :] - target_seq[:, t, :]) ** 2).mean().item()
-        timestep_errors.append(t_mse)
-
-    # Overall clip MSE
+    timestep_errors = [((pred_seq[:, t, :] - target_seq[:, t, :]) ** 2).mean().item()
+                       for t in range(pred_seq.shape[1])]
     mse = np.mean(timestep_errors)
 
-    # Determine predicted class
     true_class = labels_class[0] if labels_class else "unknown"
     pred_class = anomaly_classes[0] if mse <= threshold else true_class
 
-    # Compute metrics
     metric_values = {}
     for m in metrics_cfg:
         metric_type = str(m.get("type", "")).lower()
@@ -180,6 +161,30 @@ def plot_temporal_errors(timestep_errors, clip_idx, save_dir=None):
 
 
 # ------------------------------
+# Plot per-class summary
+# ------------------------------
+def plot_summary_table(per_class_scores, model_type, save_dir=None):
+    classes = list(per_class_scores.keys())
+    means = [np.mean(per_class_scores[cls]) for cls in classes]
+
+    plt.figure(figsize=(12, 5))
+    plt.bar(classes, means, color='skyblue')
+    plt.xticks(rotation=45, ha='right')
+    plt.ylabel("Mean MSE")
+    plt.title(f"Per-Class MSE - {model_type.capitalize()}")
+    plt.tight_layout()
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+        plt.savefig(os.path.join(save_dir, f"per_class_mse_{model_type}.png"))
+    plt.show()
+
+    # Print table
+    df = pd.DataFrame({"Class": classes, "Mean MSE": means})
+    print(f"\n=== Summary Table ({model_type}) ===")
+    print(df)
+
+
+# ------------------------------
 # Full evaluation
 # ------------------------------
 def evaluate(cfg, data_dir, plot_temporal=False, temporal_save_dir=None):
@@ -200,8 +205,7 @@ def evaluate(cfg, data_dir, plot_temporal=False, temporal_save_dir=None):
     per_class_scores = {cls: [] for cls in anomaly_classes}
     results = []
 
-    y_true_all = []
-    y_score_all = []
+    y_true_all, y_score_all = [], []
 
     with torch.no_grad():
         for idx, (xb, labels_idx, labels_class) in enumerate(test_loader):
@@ -225,50 +229,41 @@ def evaluate(cfg, data_dir, plot_temporal=False, temporal_save_dir=None):
                 "metrics": metric_values,
                 "timestep_errors": timestep_errors
             })
-            if true_class in per_class_scores:
-                per_class_scores[true_class].append(mse)
+            per_class_scores[true_class].append(mse)
 
-            # For ROC-AUC
             y_true_all.append(0 if true_class == anomaly_classes[0] else 1)
             y_score_all.append(mse)
 
             if DEBUG:
-                print(f"[DEBUG] Clip {idx}: MSE={mse:.8f}, Pred={pred_class}, True={true_class}, Metrics={metric_values}")
+                print(f"[DEBUG] Clip {idx}: MSE={mse:.8f}, Pred={pred_class}, True={true_class}")
 
-    # ------------------------------
-    # Compute per-class dynamic thresholds
-    # ------------------------------
-    per_class_thresholds = {}
-    print("\n=== Per-class MSE & suggested thresholds ===")
-    for cls, scores in per_class_scores.items():
-        mean_mse = np.mean(scores) if scores else 0.0
-        std_mse = np.std(scores) if scores else 0.0
-        threshold_cls = mean_mse + 3 * std_mse
-        per_class_thresholds[cls] = threshold_cls
-        print(f"{cls:15s}: mean={mean_mse:.8f}, std={std_mse:.8f}, threshold={threshold_cls:.8f}")
+    # Per-class thresholds
+    per_class_thresholds = {cls: np.mean(per_class_scores[cls]) + 3 * np.std(per_class_scores[cls])
+                            for cls in anomaly_classes}
+    print("\n=== Per-class MSE & thresholds ===")
+    for cls, threshold in per_class_thresholds.items():
+        print(f"{cls:15s}: mean={np.mean(per_class_scores[cls]):.8f}, std={np.std(per_class_scores[cls]):.8f}, threshold={threshold:.8f}")
 
-    # ------------------------------
-    # Flag anomalies using per-class thresholds
-    # ------------------------------
-    print("\n=== Clip anomaly detection using per-class thresholds ===")
+    # Flag anomalies for first 10 clips
+    print("\n=== Clip anomaly detection (first 10 clips) ===")
     for r in results[:10]:
-        true_cls = r['true_class']
-        cls_thresh = per_class_thresholds.get(true_cls, initial_threshold)
+        cls_thresh = per_class_thresholds[r['true_class']]
         is_anomaly = r['mse'] > cls_thresh
         metrics_str = ", ".join([f"{k}={v:.8f}" for k, v in r["metrics"].items()])
-        print(f"Clip {r['clip_idx']}: True={true_cls}, MSE={r['mse']:.8f}, Threshold={cls_thresh:.8f}, Anomaly={is_anomaly}, {metrics_str}")
+        print(f"Clip {r['clip_idx']}: True={r['true_class']}, MSE={r['mse']:.8f}, Threshold={cls_thresh:.8f}, Anomaly={is_anomaly}, {metrics_str}")
 
     avg_mse = np.mean([r['mse'] for r in results])
-    print(f"\nAverage anomaly score (MSE): {avg_mse:.8f}")
+    print(f"\nAverage MSE: {avg_mse:.8f}")
 
-    # ------------------------------
-    # Compute ROC-AUC
-    # ------------------------------
     try:
         roc_auc = roc_auc_score(y_true_all, y_score_all)
-        print(f"\nROC-AUC for anomaly detection: {roc_auc:.4f}")
+        print(f"ROC-AUC: {roc_auc:.4f}")
     except ValueError:
-        print("\nROC-AUC could not be computed (check labels and scores)")
+        roc_auc = None
+        print("ROC-AUC could not be computed")
+
+    # Plot summary
+    plot_summary_table(per_class_scores, model_type)
 
     return results, per_class_thresholds, val_dataset
 
@@ -277,13 +272,11 @@ def evaluate(cfg, data_dir, plot_temporal=False, temporal_save_dir=None):
 # Main
 # ------------------------------
 def main():
-    parser = argparse.ArgumentParser(
-        description="Evaluate STEAD / FeatureAutoencoder on X3D feature dataset"
-    )
-    parser.add_argument("--config", type=str, required=True, help="Path to YAML config file")
+    parser = argparse.ArgumentParser(description="Evaluate STEAD / Autoencoder on X3D features")
+    parser.add_argument("--config", type=str, required=True, help="Path to YAML config")
     parser.add_argument("--data_dir", type=str, required=True, help="Path to dataset")
-    parser.add_argument("--plot_temporal", action='store_true', help="Plot temporal MSE for STEAD clips")
-    parser.add_argument("--temporal_save_dir", type=str, default=None, help="Directory to save temporal plots")
+    parser.add_argument("--plot_temporal", action='store_true', help="Plot temporal MSE")
+    parser.add_argument("--temporal_save_dir", type=str, default=None, help="Save directory for temporal plots")
     args = parser.parse_args()
 
     cfg = cfg_loader.load_config(args.config)

@@ -61,3 +61,5 @@ evaluation:
       type: peak_signal_to_noise_ratio
     - name: ssim
       type: structural_similarity_index
+  plot_temporal: true
+  temporal_save_dir: ./temporal_plots
