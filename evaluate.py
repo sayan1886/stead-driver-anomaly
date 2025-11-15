@@ -187,13 +187,18 @@ def plot_summary_table(per_class_scores, model_type, save_dir=None):
 # ------------------------------
 # Full evaluation
 # ------------------------------
-def evaluate(cfg, data_dir, plot_temporal=False, temporal_save_dir=None, plot_summary=False):
+def evaluate(cfg, data_dir, plot_temporal=False, temporal_save_dir=None, plot_summary=None):
     DEBUG = cfg.get("debug", False)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model_type = cfg["model"]["type"].lower()
 
     if DEBUG:
         print(f"[DEBUG] Using device: {device}, Model type: {model_type}")
+        
+    if plot_summary is None:
+        plot_summary = cfg.get("evaluation", {}).get("plot_summary", False)
+    if temporal_save_dir is None:
+        temporal_save_dir = cfg.get("evaluation", {}).get("temporal_save_dir", None)
 
     model = load_model(cfg, device, DEBUG)
     test_dataset, val_dataset, anomaly_classes = prepare_datasets(cfg, data_dir, DEBUG)
