@@ -1,3 +1,4 @@
+# evaluate.py
 import os
 import argparse
 import numpy as np
@@ -86,45 +87,26 @@ def prepare_datasets(cfg, data_dir, DEBUG=False):
 
 
 # ------------------------------
-# Evaluate a single clip
+# Evaluate a single clip (Autoencoder)
 # ------------------------------
-# MSE(predicted future feature,actual next feature)
-
-def evaluate_clip(model, xb, labels_class, anomaly_classes, threshold, metrics_cfg, device, model_type="stead"):
+def evaluate_clip(model, xb, labels_class, anomaly_classes, threshold, metrics_cfg, device, model_type="autoencoder"):
     xb = xb.to(device)  # xb shape: [B, seq_len, feature_dim]
 
-    # ------------------------------
-    # Model forward & MSE computation
-    # ------------------------------
-    if model_type == "stead":
-        # STEAD predicts next-step features
-        # Input: xb[:, :-1, :] -> all but last step
-        # Target: xb[:, 1:, :] -> all but first step (next-step)
-        input_seq = xb[:, :-1, :]
-        target_seq = xb[:, 1:, :]
-        pred_seq, _ = model(input_seq)
-        mse = ((pred_seq - target_seq) ** 2).mean().item()
-        recon = pred_seq
-        target = target_seq
-    elif model_type == "autoencoder":
+    if model_type == "autoencoder":
         recon = model(xb)
+        mse = ((recon - xb) ** 2).mean().item()
         target = xb
-        mse = ((recon - target) ** 2).mean().item()
     else:
-        raise ValueError(f"Unsupported model type: {model_type}")
+        raise ValueError(f"Unsupported model type for evaluate_clip: {model_type}")
 
-    # ------------------------------
-    # Determine prediction & true class
-    # ------------------------------
+    # Determine predicted class
     true_class = labels_class[0] if labels_class else "unknown"
     if mse <= threshold:
         pred_class = anomaly_classes[0]  # normal
     else:
         pred_class = true_class if true_class in anomaly_classes else "unknown"
 
-    # ------------------------------
     # Compute metrics
-    # ------------------------------
     metric_values = {}
     for m in metrics_cfg:
         metric_type = str(m.get("type", "")).lower()
@@ -136,6 +118,54 @@ def evaluate_clip(model, xb, labels_class, anomaly_classes, threshold, metrics_c
             metric_values["ssim"] = compute_ssim(target, recon)
 
     return mse, pred_class, true_class, metric_values
+
+
+# ------------------------------
+# Evaluate a single clip (STEAD temporal)
+# ------------------------------
+def evaluate_clip_temporal(model, xb, labels_class, anomaly_classes, threshold, metrics_cfg, device):
+    xb = xb.to(device)  # [B, seq_len, feature_dim]
+
+    # STEAD: predict next-step features
+    input_seq = xb[:, :-1, :]
+    target_seq = xb[:, 1:, :]
+    pred_seq, _ = model(input_seq)  # might be [seq_len, feature_dim] if batch=1
+
+    # Add batch dimension if missing
+    if pred_seq.dim() == 2:
+        pred_seq = pred_seq.unsqueeze(0)   # [1, seq_len, feature_dim]
+    if target_seq.dim() == 2:
+        target_seq = target_seq.unsqueeze(0)
+
+    # Temporal MSE per timestep
+    timestep_errors = []
+    seq_len = pred_seq.shape[1]
+    for t in range(seq_len):
+        t_mse = ((pred_seq[:, t, :] - target_seq[:, t, :]) ** 2).mean().item()
+        timestep_errors.append(t_mse)
+
+    # Overall clip MSE
+    mse = np.mean(timestep_errors)
+
+    # Determine predicted class
+    true_class = labels_class[0] if labels_class else "unknown"
+    if mse <= threshold:
+        pred_class = anomaly_classes[0]  # normal
+    else:
+        pred_class = true_class if true_class in anomaly_classes else "unknown"
+
+    # Compute metrics
+    metric_values = {}
+    for m in metrics_cfg:
+        metric_type = str(m.get("type", "")).lower()
+        if "mse" in metric_type:
+            metric_values["mse"] = mse
+        elif "psnr" in metric_type:
+            metric_values["psnr"] = compute_psnr(target_seq, pred_seq)
+        elif "ssim" in metric_type:
+            metric_values["ssim"] = compute_ssim(target_seq, pred_seq)
+
+    return mse, pred_class, true_class, metric_values, timestep_errors
 
 
 # ------------------------------
@@ -156,23 +186,28 @@ def evaluate(cfg, data_dir):
     initial_threshold = float(cfg.get("evaluation", {}).get("mse_threshold", 0.001))
     metrics_cfg = cfg.get("evaluation", {}).get("metrics", [])
 
-    # ------------------------------
-    # Collect per-class MSE
-    # ------------------------------
     per_class_scores = {cls: [] for cls in anomaly_classes}
     results = []
 
     with torch.no_grad():
         for idx, (xb, labels_idx, labels_class) in enumerate(test_loader):
-            mse, pred_class, true_class, metric_values = evaluate_clip(
-                model, xb, labels_class, anomaly_classes, 0, metrics_cfg, device, model_type
-            )
+            if model_type == "stead":
+                mse, pred_class, true_class, metric_values, timestep_errors = evaluate_clip_temporal(
+                    model, xb, labels_class, anomaly_classes, 0, metrics_cfg, device
+                )
+            else:
+                mse, pred_class, true_class, metric_values = evaluate_clip(
+                    model, xb, labels_class, anomaly_classes, 0, metrics_cfg, device, model_type
+                )
+                timestep_errors = None
+
             results.append({
                 "clip_idx": idx,
                 "mse": mse,
                 "pred_class": pred_class,
                 "true_class": true_class,
-                "metrics": metric_values
+                "metrics": metric_values,
+                "timestep_errors": timestep_errors
             })
             if true_class in per_class_scores:
                 per_class_scores[true_class].append(mse)
@@ -196,7 +231,7 @@ def evaluate(cfg, data_dir):
     # Flag anomalies using per-class thresholds
     # ------------------------------
     print("\n=== Clip anomaly detection using per-class thresholds ===")
-    for r in results[:10]:  # top 10 clips
+    for r in results[:10]:
         true_cls = r['true_class']
         cls_thresh = per_class_thresholds.get(true_cls, initial_threshold)
         is_anomaly = r['mse'] > cls_thresh
