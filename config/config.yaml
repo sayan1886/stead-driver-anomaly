@@ -10,7 +10,7 @@ dataset:
 
 # Model configuration
 model:
-  type: autoencoder # "autoencoder" or "stead"
+  type: stead # "autoencoder" or "stead"
 
   # stead config
   stead:

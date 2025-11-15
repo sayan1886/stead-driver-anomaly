@@ -4,6 +4,7 @@ import argparse
 import numpy as np
 from collections import defaultdict
 from sklearn.metrics import roc_auc_score
+import matplotlib.pyplot as plt
 
 import torch
 from torch.utils.data import DataLoader, random_split
@@ -101,10 +102,7 @@ def evaluate_clip(model, xb, labels_class, anomaly_classes, threshold, metrics_c
 
     # Determine predicted class
     true_class = labels_class[0] if labels_class else "unknown"
-    if mse <= threshold:
-        pred_class = anomaly_classes[0]  # normal
-    else:
-        pred_class = true_class if true_class in anomaly_classes else "unknown"
+    pred_class = anomaly_classes[0] if mse <= threshold else true_class
 
     # Compute metrics
     metric_values = {}
@@ -129,7 +127,7 @@ def evaluate_clip_temporal(model, xb, labels_class, anomaly_classes, threshold, 
     # STEAD: predict next-step features
     input_seq = xb[:, :-1, :]
     target_seq = xb[:, 1:, :]
-    pred_seq, _ = model(input_seq)  # might be [seq_len, feature_dim] if batch=1
+    pred_seq, _ = model(input_seq)
 
     # Add batch dimension if missing
     if pred_seq.dim() == 2:
@@ -149,10 +147,7 @@ def evaluate_clip_temporal(model, xb, labels_class, anomaly_classes, threshold, 
 
     # Determine predicted class
     true_class = labels_class[0] if labels_class else "unknown"
-    if mse <= threshold:
-        pred_class = anomaly_classes[0]  # normal
-    else:
-        pred_class = true_class if true_class in anomaly_classes else "unknown"
+    pred_class = anomaly_classes[0] if mse <= threshold else true_class
 
     # Compute metrics
     metric_values = {}
@@ -169,9 +164,25 @@ def evaluate_clip_temporal(model, xb, labels_class, anomaly_classes, threshold, 
 
 
 # ------------------------------
+# Plot temporal MSE
+# ------------------------------
+def plot_temporal_errors(timestep_errors, clip_idx, save_dir=None):
+    plt.figure(figsize=(8, 4))
+    plt.plot(timestep_errors, marker='o')
+    plt.title(f"Temporal MSE - Clip {clip_idx}")
+    plt.xlabel("Timestep")
+    plt.ylabel("MSE")
+    plt.grid(True)
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+        plt.savefig(os.path.join(save_dir, f"temporal_mse_clip_{clip_idx}.png"))
+    plt.show()
+
+
+# ------------------------------
 # Full evaluation
 # ------------------------------
-def evaluate(cfg, data_dir):
+def evaluate(cfg, data_dir, plot_temporal=False, temporal_save_dir=None):
     DEBUG = cfg.get("debug", False)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model_type = cfg["model"]["type"].lower()
@@ -189,12 +200,17 @@ def evaluate(cfg, data_dir):
     per_class_scores = {cls: [] for cls in anomaly_classes}
     results = []
 
+    y_true_all = []
+    y_score_all = []
+
     with torch.no_grad():
         for idx, (xb, labels_idx, labels_class) in enumerate(test_loader):
             if model_type == "stead":
                 mse, pred_class, true_class, metric_values, timestep_errors = evaluate_clip_temporal(
                     model, xb, labels_class, anomaly_classes, 0, metrics_cfg, device
                 )
+                if plot_temporal:
+                    plot_temporal_errors(timestep_errors, idx, temporal_save_dir)
             else:
                 mse, pred_class, true_class, metric_values = evaluate_clip(
                     model, xb, labels_class, anomaly_classes, 0, metrics_cfg, device, model_type
@@ -211,6 +227,10 @@ def evaluate(cfg, data_dir):
             })
             if true_class in per_class_scores:
                 per_class_scores[true_class].append(mse)
+
+            # For ROC-AUC
+            y_true_all.append(0 if true_class == anomaly_classes[0] else 1)
+            y_score_all.append(mse)
 
             if DEBUG:
                 print(f"[DEBUG] Clip {idx}: MSE={mse:.8f}, Pred={pred_class}, True={true_class}, Metrics={metric_values}")
@@ -241,6 +261,15 @@ def evaluate(cfg, data_dir):
     avg_mse = np.mean([r['mse'] for r in results])
     print(f"\nAverage anomaly score (MSE): {avg_mse:.8f}")
 
+    # ------------------------------
+    # Compute ROC-AUC
+    # ------------------------------
+    try:
+        roc_auc = roc_auc_score(y_true_all, y_score_all)
+        print(f"\nROC-AUC for anomaly detection: {roc_auc:.4f}")
+    except ValueError:
+        print("\nROC-AUC could not be computed (check labels and scores)")
+
     return results, per_class_thresholds, val_dataset
 
 
@@ -253,10 +282,12 @@ def main():
     )
     parser.add_argument("--config", type=str, required=True, help="Path to YAML config file")
     parser.add_argument("--data_dir", type=str, required=True, help="Path to dataset")
+    parser.add_argument("--plot_temporal", action='store_true', help="Plot temporal MSE for STEAD clips")
+    parser.add_argument("--temporal_save_dir", type=str, default=None, help="Directory to save temporal plots")
     args = parser.parse_args()
 
     cfg = cfg_loader.load_config(args.config)
-    evaluate(cfg, args.data_dir)
+    evaluate(cfg, args.data_dir, plot_temporal=args.plot_temporal, temporal_save_dir=args.temporal_save_dir)
 
 
 if __name__ == "__main__":
