@@ -1,22 +1,49 @@
 # train.py
 import os
 import argparse
-
 from tqdm import tqdm
 import torch
 from torch.utils.data import DataLoader
 from dataset_x3d import X3DFeatureDataset
 
 from models.stead_model import STEAD
+from models.autoencoder_model import FeatureAutoencoder
 import config.config as cfg_loader
+
+
+# ------------------------------
+# Model factory
+# ------------------------------
+def build_model(cfg, device, DEBUG=False):
+    model_type = cfg["model"]["type"].lower()
+
+    if model_type == "stead":
+        stead_cfg = cfg["model"]["stead"]
+        model = STEAD(
+            feature_dim=int(stead_cfg["feature_dim"]),
+            hidden_dim=int(stead_cfg["hidden_dim"]),
+            seq_len=int(stead_cfg["seq_len"]),
+            num_heads=int(stead_cfg["num_heads"])
+        )
+    elif model_type == "autoencoder":
+        ae_cfg = cfg["model"]["autoencoder"]
+        model = FeatureAutoencoder(
+            input_dim=int(ae_cfg["input_dim"]),
+            hidden_dim=int(ae_cfg["hidden_dim"])
+        )
+    else:
+        raise ValueError(f"Unsupported model type: {model_type}")
+
+    if DEBUG:
+        print(f"[DEBUG] Initialized model: {model}")
+
+    return model.to(device)
+
 
 # ------------------------------
 # Training function
 # ------------------------------
-def train_stead(cfg):
-    # ------------------------------
-    # Debug & device
-    # ------------------------------
+def train(cfg):
     DEBUG = cfg.get("debug", False)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     if DEBUG:
@@ -29,10 +56,14 @@ def train_stead(cfg):
     batch_size = int(cfg["dataset"].get("batch_size", 16))
     anomaly_classes = cfg["training"].get("anomaly_class", ["normal", "anomaly"])
 
-    train_dataset = X3DFeatureDataset(root_dir=data_root, split="train",
-                                      anomaly_classes=anomaly_classes, DEBUG=DEBUG)
-    test_dataset = X3DFeatureDataset(root_dir=data_root, split="test",
-                                     anomaly_classes=anomaly_classes, DEBUG=DEBUG)
+    train_dataset = X3DFeatureDataset(
+        root_dir=data_root, split="train",
+        anomaly_classes=anomaly_classes, DEBUG=DEBUG
+    )
+    test_dataset = X3DFeatureDataset(
+        root_dir=data_root, split="test",
+        anomaly_classes=anomaly_classes, DEBUG=DEBUG
+    )
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
@@ -44,16 +75,7 @@ def train_stead(cfg):
     # ------------------------------
     # Model setup
     # ------------------------------
-    feature_dim = int(cfg["model"]["feature_dim"])
-    hidden_dim = int(cfg["model"]["hidden_dim"])
-    seq_len = int(cfg["model"]["seq_len"])
-    num_heads = int(cfg["model"]["num_heads"])
-
-    model = STEAD(feature_dim=feature_dim, hidden_dim=hidden_dim,
-                  seq_len=seq_len, num_heads=num_heads).to(device)
-
-    if DEBUG:
-        print(f"[DEBUG] Model initialized: {model}")
+    model = build_model(cfg, device, DEBUG)
 
     # ------------------------------
     # Optimizer & loss
@@ -73,30 +95,35 @@ def train_stead(cfg):
     # Training loop
     # ------------------------------
     epochs = int(cfg["training"]["epochs"])
-
     for epoch in range(epochs):
         model.train()
         running_loss = 0.0
+
         for xb, labels_idx, labels_class in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
-            xb = xb.to(device)  # [B, T, F]
+            xb = xb.to(device)
 
-            # Forward
-            recon, _ = model(xb)
+            # Forward depending on model type
+            if cfg["model"]["type"].lower() == "stead":
+                recon, _ = model(xb)
+                target = xb.mean(dim=1)  # temporal-averaged features
+            else:  # autoencoder
+                recon = model(xb)                 # [B, F]
+                target = xb.mean(dim=1)           # [B, F], ensure same B as recon
+                if recon.shape != target.shape:
+                    target = target[: recon.shape[0], :]  # trim if last batch smaller
 
-            # Target: temporal-averaged feature per clip
-            target = xb.mean(dim=1)  # [B, F]
             loss = loss_fn(recon, target)
 
             # Backward
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-
             running_loss += loss.item()
 
             if DEBUG:
                 print(f"[DEBUG] Batch labels (numeric): {labels_idx}")
                 print(f"[DEBUG] Batch labels (class): {labels_class}")
+                print(f"[DEBUG] Batch loss={loss.item():.6f}, Labels={labels_class}")
 
         avg_loss = running_loss / len(train_loader)
         print(f"Epoch {epoch+1}/{epochs} loss: {avg_loss:.6f}")
@@ -105,7 +132,7 @@ def train_stead(cfg):
     # Save model
     # ------------------------------
     os.makedirs("checkpoints", exist_ok=True)
-    model_path = os.path.join("checkpoints", "stead_driver.pt")
+    model_path = os.path.join("checkpoints", f"{cfg['model']['type']}_driver.pt")
     torch.save(model.state_dict(), model_path)
     print(f"Training finished. Model saved to {model_path}")
 
@@ -115,21 +142,16 @@ def train_stead(cfg):
 # ------------------------------
 def main():
     parser = argparse.ArgumentParser(
-        description="Train STEAD model on X3D feature dataset.\n"
+        description="Train model (STEAD or AutoEncoder) on X3D feature dataset.\n"
                     "Usage:\n"
                     "  python train.py --config config/config.yaml",
         formatter_class=argparse.RawTextHelpFormatter
     )
-    parser.add_argument(
-        "--config",
-        type=str,
-        required=True,
-        help="Path to YAML config file (e.g., config/config.yaml)"
-    )
+    parser.add_argument("--config", type=str, required=True, help="Path to YAML config file")
     args = parser.parse_args()
 
     cfg = cfg_loader.load_config(args.config)
-    train_stead(cfg)
+    train(cfg)
 
 
 if __name__ == "__main__":

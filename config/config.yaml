@@ -1,6 +1,4 @@
 # config.yaml
-
-checkpoint: "checkpoints/stead_driver.pt"
 debug: true
 
 # Dataset configuration
@@ -12,12 +10,28 @@ dataset:
 
 # Model configuration
 model:
-  type: stead
-  feature_dim: 2048
-  hidden_dim: 64
-  seq_len: 16
-  num_heads: 4
-  crop_size: 224
+  type: autoencoder # or "stead"
+
+  # stead config
+  stead:
+    feature_dim: 2048
+    hidden_dim: 64
+    seq_len: 16
+    num_heads: 4
+    crop_size: 224
+    checkpoint: "checkpoints/stead_driver.pt"
+
+  # autoencoder config
+  autoencoder:
+    input_dim: 2048
+    hidden_dim: 64
+    input_channels: 3
+    hidden_channels: 128
+    kernel_size: 3
+    learning_rate: 0.0001
+    num_epochs: 50
+    mse_threshold: 0.001
+    checkpoint: "checkpoints/autoencoder_driver.pt"
 
 # Training configuration
 training:
