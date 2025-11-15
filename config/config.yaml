@@ -63,3 +63,11 @@ evaluation:
       type: structural_similarity_index
   plot_temporal: true
   temporal_save_dir: ./temporal_plots
+  plot_summary: true
+
+# Comparison configuration
+compare:
+  save_dir: ./compare         # Where to save CSVs and plots
+  plot: true                  # Enable/disable comparison plot
+  force_train: true           # Retrain models even if checkpoints exist
+  evaluate_plot: false        # used to disable plots during compare run

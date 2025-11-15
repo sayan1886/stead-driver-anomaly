@@ -1,6 +1,6 @@
 # STEAD Driver Behaviour Anomaly Detection
 
-This repository implements **STEAD (2025)** for anomaly detection in driver behaviour, with a focus on Indian urban traffic scenarios.
+This repository implements **STEAD (2025)** for anomaly detection in driver behavior, with a focus on Indian urban traffic scenarios.
 
 ## Features
 
@@ -9,6 +9,7 @@ This repository implements **STEAD (2025)** for anomaly detection in driver beha
 - Dashcam / in-car camera dataset support
 - Sliding window extraction for long trips
 - Modular **training, evaluation**, and **preprocessing** pipelines
+- **Autoencoder vs STEAD comparison** with per-class MSE analysis
 - Lightweight & easy to extend
 
 ## Setup
@@ -55,7 +56,7 @@ Extract X3D features for all videos:
 python scripts/preprocess_x3d.py --config config/config.yaml
 ```
 
-Features are saved in the structure under X3D_Videos/.
+Features are saved in the structure under `X3D_Videos/.`
 
 ## Training
 
@@ -65,8 +66,8 @@ Train STEAD on pre-extracted features:
 python train.py --config config/config.yaml
 ```
 
-- Checkpoints are saved to checkpoints/stead_driver.pt.
-- Training uses configurable hyperparameters from config/config.yaml.
+- Checkpoints are saved to `checkpoints/stead_driver.pt` and `checkpoints/autoencoder_driver.pt`
+- Training uses configurable hyperparameters from `config/config.yaml`.
 
 ## Evaluation
 
@@ -78,6 +79,24 @@ python evaluate.py --config config/config.yaml --data_dir X3D_Videos
 
 - Outputs **anomaly scores** per clip and summary statistics.
 - Use the `DEBUG` flag in the config to see detailed logs.
+- Plots and per-class summaries can be disabled with `plot_temporal: false` in the config.
+
+## Model Comparison: Autoencoder vs STEAD
+
+Compare both models on the same dataset
+
+```bash
+python compare_models.py --config config/config.yaml --data_dir X3D_Videos
+```
+
+- ### Outputs
+
+  - `autoencoder_summary.csv` and `stead_summary.csv`
+  - `combined_summary.csv` with per-class MSE comparison
+  - `comparison_plot.png` showing Autoencoder vs STEAD per-class MSE (legend above plot)
+
+- Optionally disable plotting by setting `evaluate_plot: false` in the compare section of `config.yaml`.
+- Forces retraining if `force_train: true`.
 
 ## Folder Structure
 
@@ -87,12 +106,14 @@ python evaluate.py --config config/config.yaml --data_dir X3D_Videos
 │   ├── preprocess_single_video.py   # Test preprocessing on one video
 │   ├── preprocess_x3d.py            # Extract features for full dataset
 ├── models/
+│   └── autoencoder_model.py         # Auto-Encoder  architecture
 │   └── stead_model.py               # STEAD architecture
 ├── X3D_Videos_sample/               # Small demo feature set
 ├── train.py                         # Training script
 ├── evaluate.py                      # Evaluation script
+├── compare_models.py                # Autoencoder vs STEAD comparison
 ├── dataset_x3d.py                   # Dataset for pre-extracted features
-├── dashcam_dataset.py                # Optional: raw video dataset loader
+├── dashcam_dataset.py               # Optional: raw video dataset loader
 ├── config/
 │   └── config.yaml                  # Training and model config
 └── README.md
@@ -103,3 +124,4 @@ python evaluate.py --config config/config.yaml --data_dir X3D_Videos
 - Extend STEAD with multi-scale temporal memory
 - Add ROC / AUC metrics for anomaly detection
 - Explore online learning for real-time anomaly detection
+- Support additional comparison models and automatic plotting

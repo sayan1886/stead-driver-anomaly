@@ -187,7 +187,7 @@ def plot_summary_table(per_class_scores, model_type, save_dir=None):
 # ------------------------------
 # Full evaluation
 # ------------------------------
-def evaluate(cfg, data_dir, plot_temporal=False, temporal_save_dir=None):
+def evaluate(cfg, data_dir, plot_temporal=False, temporal_save_dir=None, plot_summary=False):
     DEBUG = cfg.get("debug", False)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model_type = cfg["model"]["type"].lower()
@@ -262,8 +262,9 @@ def evaluate(cfg, data_dir, plot_temporal=False, temporal_save_dir=None):
         roc_auc = None
         print("ROC-AUC could not be computed")
 
-    # Plot summary
-    plot_summary_table(per_class_scores, model_type)
+    # Plot summary (only if enabled)
+    if plot_summary:
+        plot_summary_table(per_class_scores, model_type)
 
     return results, per_class_thresholds, val_dataset
 
