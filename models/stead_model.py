@@ -14,15 +14,38 @@ class TemporalAttention(nn.Module):
         super().__init__()
         self.attn = nn.MultiheadAttention(embed_dim=dim, num_heads=num_heads, batch_first=True)
 
+    # def forward(self, x):
+    #     """
+    #     Args:
+    #         x: [B, T, F] tensor of pre-extracted features
+    #     Returns:
+    #         x + attention output: [B, T, F]
+    #     """
+    #     attn_out, _ = self.attn(x, x, x)
+    #     return attn_out + x
+
     def forward(self, x):
         """
         Args:
-            x: [B, T, F] tensor of pre-extracted features
+            x: Ideally [B, T, F], but may come in with extra dims.
         Returns:
             x + attention output: [B, T, F]
         """
+        # Make sure x is at least 3D: [B, T, F]
+        if x.dim() == 2:
+            # [B, F] -> [B, 1, F]
+            x = x.unsqueeze(1)
+        elif x.dim() > 3:
+            # e.g. [B, T, H, W, C] or [B, T, ...]
+            B, T = x.shape[0], x.shape[1]
+            x = x.contiguous().view(B, T, -1)  # flatten all remaining dims into F
+
+        if x.dim() != 3:
+            raise RuntimeError(f"TemporalAttention expected 3D input, got {x.shape}")
+
         attn_out, _ = self.attn(x, x, x)
         return attn_out + x
+
 
 class STEAD(nn.Module):
     def __init__(self, feature_dim=1024, hidden_dim=64, seq_len=16, num_heads=4):

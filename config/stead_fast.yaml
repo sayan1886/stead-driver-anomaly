@@ -1,30 +1,23 @@
-# config.yaml
 debug: true
 
-# Dataset configuration
 dataset:
   type: x3d
-  input_dir: ./X3D_Raw_Videos
+  input_dir: ./X3D_Videos
   root_dir: ./X3D_Videos
   batch_size: 32
 
-# Model configuration
 model:
-  type: stead # "autoencoder" or "stead"
+  type: stead
 
-  # stead config
   stead:
-#    feature_dim: 2048
     feature_dim: 1600
-    hidden_dim: 32
+    hidden_dim: 32        # smaller bottleneck (fast)
     seq_len: 8
-    num_heads: 4
+    num_heads: 2          # fewer heads (fast)
     crop_size: 224
-    checkpoint: "checkpoints/stead_driver.pt"
+    checkpoint: "checkpoints/stead_fast_driver.pt"
 
-  # autoencoder config
   autoencoder:
-#    input_dim: 2048
     input_dim: 1600
     hidden_dim: 32
     input_channels: 3
@@ -33,9 +26,8 @@ model:
     learning_rate: 0.0001
     num_epochs: 50
     mse_threshold: 0.001
-    checkpoint: "checkpoints/autoencoder_driver.pt"
+    checkpoint: "checkpoints/autoencoder_fast_driver.pt"
 
-# Training configuration
 training:
   epochs: 10
   learning_rate: 1e-3
@@ -45,15 +37,13 @@ training:
     "Robbery", "Assault", "Shooting"
   ]
 
-# Optimization configuration
 optimizer:
   type: adam
   weight_decay: 1e-4
 
-# Evaluation configuration
 evaluation:
-  mse_threshold: 0.001             # Threshold for anomaly detection
-  validation_split: 0.2            # Fraction of dataset for validation
+  mse_threshold: 0.001
+  validation_split: 0.2
   metrics:
     - name: mse
       type: mean_squared_error
@@ -64,12 +54,11 @@ evaluation:
     - name: ssim
       type: structural_similarity_index
   plot_temporal: true
-  temporal_save_dir: ./temporal_plots
+  temporal_save_dir: ./temporal_plots_fast
   plot_summary: true
 
-# Comparison configuration
 compare:
-  save_dir: ./compare         # Where to save CSVs and plots
-  plot: true                  # Enable/disable comparison plot
-  force_train: true           # Retrain models even if checkpoints exist
-  evaluate_plot: false        # used to disable plots during compare run
+  save_dir: ./compare_fast
+  plot: true
+  force_train: true
+  evaluate_plot: false

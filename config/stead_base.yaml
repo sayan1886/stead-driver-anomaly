@@ -1,0 +1,67 @@
+debug: true
+
+dataset:
+  type: x3d
+  input_dir: ./X3D_Videos
+  root_dir: ./X3D_Videos
+  batch_size: 32
+
+model:
+  type: stead
+
+  stead:
+    # Feature dim is fixed by your data: (16, 10, 10) -> 1600
+    feature_dim: 1600
+    # 🔵 Bigger model than current one (Base)
+    hidden_dim: 64
+    seq_len: 8
+    num_heads: 8
+    crop_size: 224
+    checkpoint: "checkpoints/stead_base_driver.pt"
+
+  autoencoder:
+    # Keep consistent with feature_dim; not used when type=stead, but safe
+    input_dim: 1600
+    hidden_dim: 64
+    input_channels: 3
+    hidden_channels: 64
+    kernel_size: 3
+    learning_rate: 0.0001
+    num_epochs: 50
+    mse_threshold: 0.001
+    checkpoint: "checkpoints/autoencoder_base_driver.pt"
+
+training:
+  epochs: 10
+  learning_rate: 1e-3
+  anomaly_class: [
+    "normal", "RoadAccidents", "Arson", "Shoplifting", "Stealing", "Burglary",
+    "Fighting", "Vandalism", "Explosion", "Arrest", "Abuse",
+    "Robbery", "Assault", "Shooting"
+  ]
+
+optimizer:
+  type: adam
+  weight_decay: 1e-4
+
+evaluation:
+  mse_threshold: 0.001
+  validation_split: 0.2
+  metrics:
+    - name: mse
+      type: mean_squared_error
+    - name: auc
+      type: area_under_curve
+    - name: psnr
+      type: peak_signal_to_noise_ratio
+    - name: ssim
+      type: structural_similarity_index
+  plot_temporal: true
+  temporal_save_dir: ./temporal_plots_base
+  plot_summary: true
+
+compare:
+  save_dir: ./compare_base
+  plot: true
+  force_train: true
+  evaluate_plot: false

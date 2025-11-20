@@ -6,7 +6,7 @@ import torch
 from torch.utils.data import Dataset
 
 class X3DFeatureDataset(Dataset):
-    def __init__(self, root_dir, split="train", anomaly_classes=None, DEBUG=False, default_shape=(16, 2048)):
+    def __init__(self, root_dir, split="train", anomaly_classes=None, DEBUG=False, default_shape=(192, 16, 10, 10)):
         """
         Dataset for X3D features with optional anomaly class labels.
 
@@ -25,9 +25,31 @@ class X3DFeatureDataset(Dataset):
         self.default_shape = default_shape
         self.anomaly_classes = anomaly_classes or ["normal", "anomaly"]
 
+        # if split == "train":
+        #     normal_dir = os.path.join(root_dir, "Training_Normal_Videos_Anomaly")
+        #     self._load_dir(normal_dir, class_idx=0)
+        #
+        # elif split == "test":
+        #     # Normal videos
+        #     self._load_dir(os.path.join(root_dir, "Testing_Normal_Videos_Anomaly"), class_idx=0)
+
         if split == "train":
             normal_dir = os.path.join(root_dir, "Training_Normal_Videos_Anomaly")
             self._load_dir(normal_dir, class_idx=0)
+
+            # 🔁 FALLBACK: if training folder is missing or empty, use the test layout
+            if len(self.samples) == 0:
+                if self.DEBUG:
+                    print("[DEBUG] Train split is empty or Training_Normal_Videos_Anomaly is missing; "
+                          "falling back to test layout under root_dir")
+
+                # Normal videos from Testing_Normal_Videos_Anomaly (if it exists)
+                self._load_dir(os.path.join(root_dir, "Testing_Normal_Videos_Anomaly"), class_idx=0)
+
+                # Anomaly videos from each anomaly class directory (RoadAccidents, Assault, etc.)
+                for class_idx, cls_name in enumerate(self.anomaly_classes[1:], start=1):
+                    cls_dir = os.path.join(root_dir, cls_name)
+                    self._load_dir(cls_dir, class_idx=class_idx)
 
         elif split == "test":
             # Normal videos

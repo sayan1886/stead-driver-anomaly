@@ -113,35 +113,104 @@ def evaluate_clip(model, xb, labels_class, anomaly_classes, threshold, metrics_c
 # ------------------------------
 # Evaluate a single clip (STEAD)
 # ------------------------------
+# def evaluate_clip_temporal(model, xb, labels_class, anomaly_classes, threshold, metrics_cfg, device):
+#     xb = xb.to(device)
+#     input_seq = xb[:, :-1, :]
+#     target_seq = xb[:, 1:, :]
+#     pred_seq, _ = model(input_seq)
+#
+#     if pred_seq.dim() == 2:
+#         pred_seq = pred_seq.unsqueeze(0)
+#     if target_seq.dim() == 2:
+#         target_seq = target_seq.unsqueeze(0)
+#
+#     timestep_errors = [((pred_seq[:, t, :] - target_seq[:, t, :]) ** 2).mean().item()
+#                        for t in range(pred_seq.shape[1])]
+#     mse = np.mean(timestep_errors)
+#
+#     true_class = labels_class[0] if labels_class else "unknown"
+#     pred_class = anomaly_classes[0] if mse <= threshold else true_class
+#
+#     metric_values = {}
+#     for m in metrics_cfg:
+#         metric_type = str(m.get("type", "")).lower()
+#         if "mse" in metric_type:
+#             metric_values["mse"] = mse
+#         elif "psnr" in metric_type:
+#             metric_values["psnr"] = compute_psnr(target_seq, pred_seq)
+#         elif "ssim" in metric_type:
+#             metric_values["ssim"] = compute_ssim(target_seq, pred_seq)
+#
+#     return mse, pred_class, true_class, metric_values, timestep_errors
 def evaluate_clip_temporal(model, xb, labels_class, anomaly_classes, threshold, metrics_cfg, device):
-    xb = xb.to(device)
-    input_seq = xb[:, :-1, :]
-    target_seq = xb[:, 1:, :]
-    pred_seq, _ = model(input_seq)
+    """
+    Clip-wise evaluation for STEAD, consistent with training loss.
 
-    if pred_seq.dim() == 2:
-        pred_seq = pred_seq.unsqueeze(0)
-    if target_seq.dim() == 2:
-        target_seq = target_seq.unsqueeze(0)
+    xb:           [B, T, C, H, W]  or  [B, T, F]
+    labels_class: batch of class names (tuple/list of strings) from DataLoader
+    anomaly_classes: list of class names, anomaly_classes[0] = "normal"
+    threshold:    scalar MSE threshold (used later at per-class level)
+    metrics_cfg:  list of metric configs from YAML
+    device:       torch.device
+    """
+    model.eval()
 
-    timestep_errors = [((pred_seq[:, t, :] - target_seq[:, t, :]) ** 2).mean().item()
-                       for t in range(pred_seq.shape[1])]
-    mse = np.mean(timestep_errors)
+    # ---- 0) Move only features to device ----
+    xb = xb.to(device)            # [B, T, ...]
+    B, T = xb.shape[0], xb.shape[1]
 
-    true_class = labels_class[0] if labels_class else "unknown"
+    # ---- 1) Flatten spatial/feature dims -> [B, T, F] ----
+    if xb.dim() > 3:
+        xb_flat = xb.contiguous().view(B, T, -1)   # [B, T, F]
+    else:
+        xb_flat = xb                               # already [B, T, F]
+
+    with torch.no_grad():
+        # Our STEAD model expects [B, T, F] and internally does temporal attention
+        # and mean over time, then reconstructs -> [B, F]
+        recon, _ = model(xb_flat)                  # [B, F]
+
+    # ---- 2) Build target exactly like training ----
+    target = xb_flat.mean(dim=1)                   # [B, F]
+
+    # ---- 3) Clip-wise MSE ----
+    mse_per_sample = ((recon - target) ** 2).mean(dim=1)  # [B]
+    mse = mse_per_sample.mean().item()
+
+    # ---- 4) True / predicted class labels (strings) ----
+    # labels_class is typically ('Abuse',) because batch_size = 1
+    if isinstance(labels_class, (list, tuple)):
+        true_class = str(labels_class[0])
+    else:
+        true_class = str(labels_class)
+
+    # For now, this per-clip pred_class is not that important; the script later
+    # recomputes thresholds per class using all scores.
     pred_class = anomaly_classes[0] if mse <= threshold else true_class
 
+    # ---- 5) Metrics (MSE, PSNR, SSIM) ----
     metric_values = {}
-    for m in metrics_cfg:
-        metric_type = str(m.get("type", "")).lower()
-        if "mse" in metric_type:
-            metric_values["mse"] = mse
-        elif "psnr" in metric_type:
-            metric_values["psnr"] = compute_psnr(target_seq, pred_seq)
-        elif "ssim" in metric_type:
-            metric_values["ssim"] = compute_ssim(target_seq, pred_seq)
+    if metrics_cfg is not None:
+        for m in metrics_cfg:
+            metric_type = str(m.get("type", "")).lower()
+            if "mse" in metric_type:
+                metric_values["mse"] = mse
+            elif "psnr" in metric_type:
+                metric_values["psnr"] = compute_psnr(target, recon)
+            elif "ssim" in metric_type:
+                metric_values["ssim"] = compute_ssim(target, recon)
+
+    # ---- 6) Temporal error curve (for plotting only) ----
+    # Compare recon [B, F] to each timestep's features [B, T, F]
+    recon_seq = recon.unsqueeze(1).expand(-1, T, -1)  # [B, T, F]
+    timestep_errors = [
+        ((recon_seq[:, t, :] - xb_flat[:, t, :]) ** 2).mean().item()
+        for t in range(T)
+    ]
 
     return mse, pred_class, true_class, metric_values, timestep_errors
+
+
 
 
 # ------------------------------

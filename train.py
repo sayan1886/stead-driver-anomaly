@@ -103,14 +103,33 @@ def train(cfg):
             xb = xb.to(device)
 
             # Forward depending on model type
+            # if cfg["model"]["type"].lower() == "stead":
+            #     recon, _ = model(xb)
+            #     target = xb.mean(dim=1)  # temporal-averaged features
+            # else:  # autoencoder
+            #     recon = model(xb)                 # [B, F]
+            #     target = xb.mean(dim=1)           # [B, F], ensure same B as recon
+            #     if recon.shape != target.shape:
+            #         target = target[: recon.shape[0], :]  # trim if last batch smaller
+
             if cfg["model"]["type"].lower() == "stead":
-                recon, _ = model(xb)
-                target = xb.mean(dim=1)  # temporal-averaged features
-            else:  # autoencoder
+                # xb: [B, T, C, H, W] or [B, T, ...]
+                recon, _ = model(xb)          # [B, F], F=1600
+
+                # Temporal average over T
+                target = xb.mean(dim=1)       # [B, C, H, W] or [B, F]
+
+                # Flatten all remaining dims so target matches recon
+                if target.dim() > 2:
+                    target = target.view(target.size(0), -1)   # [B, F]
+            else:  # autoencoder (we can leave as-is for now)
                 recon = model(xb)                 # [B, F]
                 target = xb.mean(dim=1)           # [B, F], ensure same B as recon
                 if recon.shape != target.shape:
                     target = target[: recon.shape[0], :]  # trim if last batch smaller
+
+            loss = loss_fn(recon, target)
+
 
             loss = loss_fn(recon, target)
 
