@@ -52,13 +52,22 @@ def load_model(cfg, device, DEBUG=False):
 
     model = build_model(cfg, device, DEBUG)
 
-    if checkpoint and os.path.exists(checkpoint):
-        if DEBUG:
-            print(f"[DEBUG] Loading checkpoint: {checkpoint}")
-        state_dict = torch.load(checkpoint, map_location=device)
-        model.load_state_dict(state_dict)
-    elif DEBUG:
-        print(f"[WARNING] No valid checkpoint found for model type {model_type}")
+    # if checkpoint and os.path.exists(checkpoint):
+    #     if DEBUG:
+    #         print(f"[DEBUG] Loading checkpoint: {checkpoint}")
+    #     state_dict = torch.load(checkpoint, map_location=device)
+    #     model.load_state_dict(state_dict)
+    # elif DEBUG:
+    #     print(f"[WARNING] No valid checkpoint found for model type {model_type}")
+    if checkpoint is None:
+        raise ValueError(f"No checkpoint path found in config for model type '{model_type}'")
+
+    if not os.path.exists(checkpoint):
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint}")
+
+    print(f"[INFO] Loading checkpoint: {checkpoint}")
+    state_dict = torch.load(checkpoint, map_location=device)
+    model.load_state_dict(state_dict)
 
     model.eval()
     return model

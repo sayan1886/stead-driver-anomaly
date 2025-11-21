@@ -150,10 +150,21 @@ def train(cfg):
     # ------------------------------
     # Save model
     # ------------------------------
-    os.makedirs("checkpoints", exist_ok=True)
-    model_path = os.path.join("checkpoints", f"{cfg['model']['type']}_driver.pt")
-    torch.save(model.state_dict(), model_path)
-    print(f"Training finished. Model saved to {model_path}")
+    # os.makedirs("checkpoints", exist_ok=True)
+    # model_path = os.path.join("checkpoints", f"{cfg['model']['type']}_driver.pt")
+    # torch.save(model.state_dict(), model_path)
+    # print(f"Training finished. Model saved to {model_path}")
+
+    # Get checkpoint path from YAML
+    stead_cfg = cfg["model"]["stead"]
+    checkpoint_path = stead_cfg.get("checkpoint", "checkpoints/stead_driver.pt")
+
+    # Ensure folder exists
+    os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
+
+    # Save the model
+    torch.save(model.state_dict(), checkpoint_path)
+    print(f"[INFO] Training finished. Model saved to: {checkpoint_path}")
 
 
 # ------------------------------
