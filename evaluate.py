@@ -317,10 +317,22 @@ def evaluate(cfg, data_dir, plot_temporal=False, temporal_save_dir=None, plot_su
             # y_true_all.append(0 if true_class == anomaly_classes[0] else 1)
             # y_score_all.append(mse)
 
+            # y_true_all.append(0 if true_class == anomaly_classes[0] else 1)
+            #
+            # # Use temporal spike score instead of mean
+            # anomaly_score = max(timestep_errors) if timestep_errors is not None else mse
+            # y_score_all.append(anomaly_score)
+
             y_true_all.append(0 if true_class == anomaly_classes[0] else 1)
 
-            # Use temporal spike score instead of mean
-            anomaly_score = max(timestep_errors) if timestep_errors is not None else mse
+            # EXP5: Top-10% temporal error mean scoring (more stable than max)
+            if timestep_errors is not None and len(timestep_errors) > 0:
+                k = max(1, int(0.10 * len(timestep_errors)))  # top 10%
+                topk = sorted(timestep_errors, reverse=True)[:k]
+                anomaly_score = float(np.mean(topk))
+            else:
+                anomaly_score = mse
+
             y_score_all.append(anomaly_score)
 
             if DEBUG:
