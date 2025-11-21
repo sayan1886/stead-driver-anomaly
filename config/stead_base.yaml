@@ -33,7 +33,7 @@ model:
 
 training:
   epochs: 50
-  learning_rate: 1e-4
+  learning_rate: 5e-4
   anomaly_class: [
     "normal", "RoadAccidents", "Arson", "Shoplifting", "Stealing", "Burglary",
     "Fighting", "Vandalism", "Explosion", "Arrest", "Abuse",
@@ -41,8 +41,8 @@ training:
   ]
 
 optimizer:
-  type: adamw
-  weight_decay: 1e-2
+  type: adam
+  weight_decay: 1e-4
 
 evaluation:
   mse_threshold: 0.001
