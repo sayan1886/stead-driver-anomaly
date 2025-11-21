@@ -108,7 +108,7 @@ def train(cfg):
     # ------------------------------
     # ✅ FIX: define epochs BEFORE scheduler
     epochs = int(cfg["training"]["epochs"])
-    scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
+    # scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
 
     for epoch in range(epochs):
         model.train()
@@ -149,7 +149,7 @@ def train(cfg):
         avg_loss = running_loss / len(train_loader)
         print(f"Epoch {epoch+1}/{epochs} loss: {avg_loss:.6f}")
 
-        scheduler.step()
+        # scheduler.step()
 
     # ------------------------------
     # Save model
