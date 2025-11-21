@@ -9,7 +9,7 @@ from dataset_x3d import X3DFeatureDataset
 from models.stead_model import STEAD
 from models.autoencoder_model import FeatureAutoencoder
 import config.config as cfg_loader
-
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
 # ------------------------------
 # Model factory
@@ -84,33 +84,38 @@ def train(cfg):
     learning_rate = float(cfg["training"]["learning_rate"])
     weight_decay = float(opt_cfg.get("weight_decay", 0.0))
 
-    optimizer = torch.optim.Adam(
-        model.parameters(),
-        lr=learning_rate,
-        weight_decay=weight_decay
-    )
+    opt_type = opt_cfg.get("type", "adam").lower()
+
+    if opt_type == "adam":
+        optimizer = torch.optim.Adam(
+            model.parameters(),
+            lr=learning_rate,
+            weight_decay=weight_decay
+        )
+    elif opt_type == "adamw":
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=learning_rate,
+            weight_decay=weight_decay
+        )
+    else:
+        raise ValueError(f"Unknown optimizer type: {opt_type}")
+
     loss_fn = torch.nn.MSELoss()
 
     # ------------------------------
     # Training loop
     # ------------------------------
+    # ✅ FIX: define epochs BEFORE scheduler
     epochs = int(cfg["training"]["epochs"])
+    scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
+
     for epoch in range(epochs):
         model.train()
         running_loss = 0.0
 
         for xb, labels_idx, labels_class in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
             xb = xb.to(device)
-
-            # Forward depending on model type
-            # if cfg["model"]["type"].lower() == "stead":
-            #     recon, _ = model(xb)
-            #     target = xb.mean(dim=1)  # temporal-averaged features
-            # else:  # autoencoder
-            #     recon = model(xb)                 # [B, F]
-            #     target = xb.mean(dim=1)           # [B, F], ensure same B as recon
-            #     if recon.shape != target.shape:
-            #         target = target[: recon.shape[0], :]  # trim if last batch smaller
 
             if cfg["model"]["type"].lower() == "stead":
                 # xb: [B, T, C, H, W] or [B, T, ...]
@@ -122,14 +127,11 @@ def train(cfg):
                 # Flatten all remaining dims so target matches recon
                 if target.dim() > 2:
                     target = target.view(target.size(0), -1)   # [B, F]
-            else:  # autoencoder (we can leave as-is for now)
+            else:  # autoencoder
                 recon = model(xb)                 # [B, F]
-                target = xb.mean(dim=1)           # [B, F], ensure same B as recon
+                target = xb.mean(dim=1)           # [B, F]
                 if recon.shape != target.shape:
                     target = target[: recon.shape[0], :]  # trim if last batch smaller
-
-            loss = loss_fn(recon, target)
-
 
             loss = loss_fn(recon, target)
 
@@ -147,22 +149,16 @@ def train(cfg):
         avg_loss = running_loss / len(train_loader)
         print(f"Epoch {epoch+1}/{epochs} loss: {avg_loss:.6f}")
 
+        scheduler.step()
+
     # ------------------------------
     # Save model
     # ------------------------------
-    # os.makedirs("checkpoints", exist_ok=True)
-    # model_path = os.path.join("checkpoints", f"{cfg['model']['type']}_driver.pt")
-    # torch.save(model.state_dict(), model_path)
-    # print(f"Training finished. Model saved to {model_path}")
-
-    # Get checkpoint path from YAML
     stead_cfg = cfg["model"]["stead"]
     checkpoint_path = stead_cfg.get("checkpoint", "checkpoints/stead_driver.pt")
 
-    # Ensure folder exists
     os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
 
-    # Save the model
     torch.save(model.state_dict(), checkpoint_path)
     print(f"[INFO] Training finished. Model saved to: {checkpoint_path}")
 

@@ -32,8 +32,8 @@ model:
     checkpoint: "checkpoints/autoencoder_base_driver.pt"
 
 training:
-  epochs: 10
-  learning_rate: 1e-3
+  epochs: 50
+  learning_rate: 1e-4
   anomaly_class: [
     "normal", "RoadAccidents", "Arson", "Shoplifting", "Stealing", "Burglary",
     "Fighting", "Vandalism", "Explosion", "Arrest", "Abuse",
@@ -41,8 +41,8 @@ training:
   ]
 
 optimizer:
-  type: adam
-  weight_decay: 1e-4
+  type: adamw
+  weight_decay: 1e-2
 
 evaluation:
   mse_threshold: 0.001
