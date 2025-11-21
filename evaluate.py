@@ -314,8 +314,14 @@ def evaluate(cfg, data_dir, plot_temporal=False, temporal_save_dir=None, plot_su
             })
             per_class_scores[true_class].append(mse)
 
+            # y_true_all.append(0 if true_class == anomaly_classes[0] else 1)
+            # y_score_all.append(mse)
+
             y_true_all.append(0 if true_class == anomaly_classes[0] else 1)
-            y_score_all.append(mse)
+
+            # Use temporal spike score instead of mean
+            anomaly_score = max(timestep_errors) if timestep_errors is not None else mse
+            y_score_all.append(anomaly_score)
 
             if DEBUG:
                 print(f"[DEBUG] Clip {idx}: MSE={mse:.8f}, Pred={pred_class}, True={true_class}")
