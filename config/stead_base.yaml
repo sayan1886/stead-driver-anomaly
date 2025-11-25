@@ -11,10 +11,10 @@ model:
 
   stead:
     # Feature dim is fixed by your data: (16, 10, 10) -> 1600
-    feature_dim: 1600
-    # 🔵 Bigger model than current one (Base)
+    feature_dim: 2048
+    # Bigger model than current one (Base)
     hidden_dim: 64
-    seq_len: 8
+    seq_len: 16
     num_heads: 8
     crop_size: 224
     checkpoint: "checkpoints/stead_base_driver.pt"
@@ -32,7 +32,7 @@ model:
     checkpoint: "checkpoints/autoencoder_base_driver.pt"
 
 training:
-  epochs: 50
+  epochs: 40
   learning_rate: 5e-4
   anomaly_class: [
     "normal", "RoadAccidents", "Arson", "Shoplifting", "Stealing", "Burglary",

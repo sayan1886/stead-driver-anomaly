@@ -1,7 +1,6 @@
 # scripts/preprocess_x3d.py
 import os
 import sys
-import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tqdm import tqdm
@@ -113,8 +112,8 @@ def main():
     # Now parse YAML config
     cfg = cfg_loader.load_config(args.config)
 
-    CLIP_LEN = cfg["model"]["seq_len"]
-    CROP_SIZE = cfg["model"]["crop_size"]
+    CLIP_LEN = cfg["model"]["stead"]["seq_len"]
+    CROP_SIZE = cfg["model"]["stead"]["crop_size"]
     DEBUG = cfg["debug"]
 
     # Initialize X3D model

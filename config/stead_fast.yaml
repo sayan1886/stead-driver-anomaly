@@ -10,7 +10,7 @@ model:
   type: stead
 
   stead:
-    feature_dim: 1600
+    feature_dim: 2048
     hidden_dim: 32        # smaller bottleneck (fast)
     seq_len: 8
     num_heads: 2          # fewer heads (fast)
